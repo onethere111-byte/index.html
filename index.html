@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>HAZARD 7007 // ULTIMATE VIBE</title>
+  <title>HAZARD 7007 // BASS & TIFON EDITION</title>
   <style>
     * {
       box-sizing: border-box;
@@ -263,12 +263,12 @@
       box-shadow: 0 3px 0 #080a0d, 0 0 32px rgba(255, 30, 56, 0.6);
     }
 
-    .pad.manual { border-color: rgba(0, 136, 255, 0.45); }
-    .pad.manual.down {
+    .pad.tifon { border-color: rgba(255, 183, 3, 0.45); }
+    .pad.tifon.down {
       transform: translateY(5px);
-      background: linear-gradient(180deg, #0e3a6b 0%, #071d36 100%);
-      border-color: #0088ff;
-      box-shadow: 0 3px 0 #080a0d, 0 0 32px rgba(0, 136, 255, 0.6);
+      background: linear-gradient(180deg, #5c3d04 0%, #291b02 100%);
+      border-color: #ffb703;
+      box-shadow: 0 3px 0 #080a0d, 0 0 32px rgba(255, 183, 3, 0.6);
     }
 
     .tools-row {
@@ -362,8 +362,8 @@
   <div class="hazard-deck" id="deck">
     <div class="top-bar">
       <div class="logo">
-        <span>PREMIER HAZARD</span>
-        <span>7007 // ULTIMATE</span>
+        <span>PREMIER HAZARD // BASS</span>
+        <span>7007 + TIFON T-37</span>
       </div>
       <div class="telemetry-pills">
         <div class="volt-pill" id="voltMeter">14.2V</div>
@@ -381,7 +381,7 @@
       </div>
       <div class="oled-sub">
         <span id="strobeModeLabel">STROBE: OFF</span>
-        <span>DUAL HORN DSP 2x800W</span>
+        <span>LOW-END DSP 400W+T37</span>
       </div>
       <canvas id="scope"></canvas>
     </div>
@@ -391,18 +391,18 @@
       <button class="mode-btn" data-m="WAIL">WAIL</button>
       <button class="mode-btn" data-m="YELP">YELP</button>
       <button class="mode-btn" data-m="HI-LO">HI-LO</button>
-      <button class="mode-btn" data-m="PIERCER">PIERCER</button>
-      <button class="mode-btn" data-m="PHASER">PHASER</button>
+      <button class="mode-btn" data-m="BASS-KRYAK">BASS KRYAK</button>
+      <button class="mode-btn" data-m="MANUAL">MANUAL</button>
     </div>
 
     <div class="big-pads">
       <button class="pad horn" id="padHorn">
-        <strong>AIR HORN</strong>
-        <small>КРЯКАЛКА [HOLD]</small>
+        <strong>GROB HORN</strong>
+        <small>ГРУБЫЙ КРЯК [HOLD]</small>
       </button>
-      <button class="pad manual" id="padManual">
-        <strong>MANUAL</strong>
-        <small>НАКАТ [HOLD]</small>
+      <button class="pad tifon" id="padTifon">
+        <strong>TIFON T-37</strong>
+        <small>ТЕПЛОВОЗ БАС [HOLD]</small>
       </button>
     </div>
 
@@ -414,22 +414,23 @@
 
     <div class="gain-box">
       <span>GAIN</span>
-      <input type="range" id="gainSlider" min="0" max="1" step="0.01" value="0.75" />
-      <span id="gainVal">75%</span>
+      <input type="range" id="gainSlider" min="0" max="1" step="0.01" value="0.85" />
+      <span id="gainVal">85%</span>
     </div>
   </div>
 
   <script>
-    // Аудио-движок Premier Hazard 7007 (Web Audio API)
+    // Аудио-движок с акцентом на низкий грубый бас (Hazard Low + Тифон Т-37)
     let ctx = null;
-    let osc1 = null, osc2 = null, masterGain = null, filterNode = null, analyser = null;
+    let osc1 = null, osc2 = null, subOsc = null;
+    let masterGain = null, filterNode = null, distortion = null, analyser = null;
     let currentMode = 'OFF';
     let hornDown = false;
-    let manualDown = false;
+    let tifonDown = false;
     let pttActive = false;
     let strobeMode = 0; // 0: OFF, 1: PATROL, 2: HYPER
     let hornFlash = true;
-    let manualFreq = 350;
+    let manualFreq = 260;
     let currentFreq = 0;
     let startTime = 0;
 
@@ -453,6 +454,17 @@
     const scope = document.getElementById('scope');
     const sCtx = scope.getContext('2d');
 
+    // Мягкий сатуратор для "хриплого" рупорного перегруза
+    function makeDistortionCurve(amount) {
+      const n = 44100;
+      const curve = new Float32Array(n);
+      for (let i = 0; i < n; ++i) {
+        const x = (i * 2) / n - 1;
+        curve[i] = ((3 + amount) * x * 20 * (Math.PI / 180)) / (Math.PI + amount * Math.abs(x));
+      }
+      return curve;
+    }
+
     function initAudio() {
       if (!ctx) {
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -460,13 +472,20 @@
 
         osc1 = ctx.createOscillator();
         osc2 = ctx.createOscillator();
+        subOsc = ctx.createOscillator();
+
         osc1.type = 'sawtooth';
-        osc2.type = 'square';
+        osc2.type = 'sawtooth';
+        subOsc.type = 'square';
+
+        distortion = ctx.createWaveShaper();
+        distortion.curve = makeDistortionCurve(18);
+        distortion.oversample = '2x';
 
         filterNode = ctx.createBiquadFilter();
-        filterNode.type = 'bandpass';
+        filterNode.type = 'lowpass';
         filterNode.frequency.value = 950;
-        filterNode.Q.value = 1.6;
+        filterNode.Q.value = 2.2;
 
         masterGain = ctx.createGain();
         masterGain.gain.value = 0;
@@ -474,18 +493,26 @@
         analyser = ctx.createAnalyser();
         analyser.fftSize = 256;
 
-        const subGain2 = ctx.createGain();
-        subGain2.gain.value = 0.45;
+        const g1 = ctx.createGain(); g1.gain.value = 0.55;
+        const g2 = ctx.createGain(); g2.gain.value = 0.55;
+        const gSub = ctx.createGain(); gSub.gain.value = 0.45;
 
-        osc1.connect(filterNode);
-        osc2.connect(subGain2);
-        subGain2.connect(filterNode);
+        osc1.connect(g1);
+        osc2.connect(g2);
+        subOsc.connect(gSub);
+
+        g1.connect(distortion);
+        g2.connect(distortion);
+        gSub.connect(distortion);
+
+        distortion.connect(filterNode);
         filterNode.connect(masterGain);
         masterGain.connect(analyser);
         analyser.connect(ctx.destination);
 
         osc1.start();
         osc2.start();
+        subOsc.start();
         startTime = ctx.currentTime;
       }
       if (ctx.state === 'suspended') {
@@ -493,7 +520,7 @@
       }
     }
 
-    // Переключение режимов сирены
+    // Переключение режимов
     document.querySelectorAll('.mode-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         initAudio();
@@ -504,7 +531,7 @@
       });
     });
 
-    // Обработка нажатий Air Horn (Крякалка)
+    // Грубый низкий кряк (GROB HORN)
     const padHorn = document.getElementById('padHorn');
     const setHorn = (state) => {
       initAudio();
@@ -512,23 +539,27 @@
       padHorn.classList.toggle('down', state);
       if (state) {
         deck.classList.add('kick');
-        setTimeout(() => deck.classList.remove('kick'), 70);
+        setTimeout(() => deck.classList.remove('kick'), 80);
       }
     };
     padHorn.addEventListener('pointerdown', (e) => { e.preventDefault(); setHorn(true); });
     window.addEventListener('pointerup', () => { if (hornDown) setHorn(false); });
     padHorn.addEventListener('pointerleave', () => { if (hornDown) setHorn(false); });
 
-    // Обработка нажатий Manual (Накат)
-    const padManual = document.getElementById('padManual');
-    const setManual = (state) => {
+    // Тепловозный гудок (TIFON T-37)
+    const padTifon = document.getElementById('padTifon');
+    const setTifon = (state) => {
       initAudio();
-      manualDown = state;
-      padManual.classList.toggle('down', state);
+      tifonDown = state;
+      padTifon.classList.toggle('down', state);
+      if (state) {
+        deck.classList.add('kick');
+        setTimeout(() => deck.classList.remove('kick'), 110);
+      }
     };
-    padManual.addEventListener('pointerdown', (e) => { e.preventDefault(); setManual(true); });
-    window.addEventListener('pointerup', () => { if (manualDown) setManual(false); });
-    padManual.addEventListener('pointerleave', () => { if (manualDown) setManual(false); });
+    padTifon.addEventListener('pointerdown', (e) => { e.preventDefault(); setTifon(true); });
+    window.addEventListener('pointerup', () => { if (tifonDown) setTifon(false); });
+    padTifon.addEventListener('pointerleave', () => { if (tifonDown) setTifon(false); });
 
     // Стробоскопы
     const strobeNames = ['OFF', 'PATROL', 'HYPER'];
@@ -540,13 +571,13 @@
       btnStrobe.classList.toggle('on-strobe', strobeMode > 0);
     });
 
-    // Вспышка при крякалке
+    // Вспышка при гудке
     btnHornFlash.addEventListener('click', () => {
       hornFlash = !hornFlash;
       btnHornFlash.classList.toggle('on-flash-horn', hornFlash);
     });
 
-    // Кнопка PTT (имитация тангенты - приглушает сирену)
+    // Кнопка PTT
     btnPtt.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       initAudio();
@@ -565,7 +596,7 @@
       gainVal.textContent = `${Math.round(gainSlider.value * 100)}%`;
     });
 
-    // Главный цикл DSP и визуализации
+    // Главный цикл DSP
     function loop() {
       const now = performance.now();
       let activeSound = false;
@@ -579,54 +610,68 @@
           displayMode = 'PA // PTT';
           currentFreq = 0;
           masterGain.gain.setTargetAtTime(0, ctx.currentTime, 0.02);
+        } else if (tifonDown) {
+          // Жесткий низкий аккорд тепловозного тифона Т-37 (около 290 Гц + квинта + суб-октава)
+          activeSound = true;
+          displayMode = 'TIFON T-37';
+          const flutter = Math.sin(t * 55) * 4;
+          currentFreq = 295 + flutter;
+          osc1.frequency.setValueAtTime(currentFreq, ctx.currentTime);
+          osc2.frequency.setValueAtTime(currentFreq * 1.25, ctx.currentTime); // Плотный грубый интервал
+          subOsc.frequency.setValueAtTime(currentFreq * 0.5, ctx.currentTime); // Суб-бас 147 Гц
+          filterNode.frequency.setValueAtTime(880, ctx.currentTime);
+          masterGain.gain.setTargetAtTime(targetVol, ctx.currentTime, 0.035);
         } else if (hornDown) {
-          // Характерный сухой двойной тон Premier Hazard 7007
+          // Грубый низкочастотный кряк (320 Гц с жесткой модуляцией)
           activeSound = true;
-          displayMode = 'AIR HORN';
-          const wobble = Math.sin(t * 95) * 18;
-          currentFreq = 465 + wobble;
+          displayMode = 'GROB HORN';
+          const growl = Math.sin(t * 88) * 22;
+          currentFreq = 325 + growl;
           osc1.frequency.setValueAtTime(currentFreq, ctx.currentTime);
-          osc2.frequency.setValueAtTime(currentFreq * 1.49, ctx.currentTime);
-          filterNode.frequency.setValueAtTime(1100, ctx.currentTime);
+          osc2.frequency.setValueAtTime(currentFreq * 1.48, ctx.currentTime);
+          subOsc.frequency.setValueAtTime(currentFreq * 0.5, ctx.currentTime);
+          filterNode.frequency.setValueAtTime(980, ctx.currentTime);
           masterGain.gain.setTargetAtTime(targetVol, ctx.currentTime, 0.012);
-        } else if (manualDown) {
-          activeSound = true;
-          displayMode = 'MANUAL';
-          manualFreq = Math.min(1380, manualFreq + 16);
-          currentFreq = manualFreq;
-          osc1.frequency.setValueAtTime(currentFreq, ctx.currentTime);
-          osc2.frequency.setValueAtTime(currentFreq * 1.005, ctx.currentTime);
-          filterNode.frequency.setValueAtTime(currentFreq * 1.3, ctx.currentTime);
-          masterGain.gain.setTargetAtTime(targetVol, ctx.currentTime, 0.02);
         } else {
-          if (manualFreq > 350) manualFreq = Math.max(350, manualFreq - 12);
+          if (currentMode === 'MANUAL') {
+            activeSound = true;
+            manualFreq = Math.min(980, manualFreq + 10);
+            currentFreq = manualFreq;
+          } else {
+            manualFreq = 260;
+          }
 
           if (currentMode === 'WAIL') {
             activeSound = true;
-            currentFreq = 820 + Math.sin(t * 1.35 - Math.PI / 2) * 440;
+            currentFreq = 620 + Math.sin(t * 1.25 - Math.PI / 2) * 320;
           } else if (currentMode === 'YELP') {
             activeSound = true;
-            currentFreq = 880 + Math.sin(t * 19) * 420;
+            currentFreq = 680 + Math.sin(t * 17) * 310;
           } else if (currentMode === 'HI-LO') {
             activeSound = true;
-            currentFreq = (Math.floor(t * 2.4) % 2 === 0) ? 780 : 585;
-          } else if (currentMode === 'PIERCER') {
+            currentFreq = (Math.floor(t * 2.2) % 2 === 0) ? 590 : 440;
+          } else if (currentMode === 'BASS-KRYAK') {
+            // Автоматическая серия грубых двойных кряков
             activeSound = true;
-            currentFreq = 950 + Math.sin(t * 48) * 380;
-          } else if (currentMode === 'PHASER') {
-            activeSound = true;
-            currentFreq = 900 + ((t * 14) % 1) * 550;
-          } else {
+            const beat = (t * 2.8) % 1;
+            if (beat < 0.28 || (beat > 0.42 && beat < 0.72)) {
+              currentFreq = 320 + Math.sin(t * 88) * 20;
+            } else {
+              activeSound = false;
+              currentFreq = 0;
+            }
+          } else if (currentMode !== 'MANUAL') {
             currentFreq = 0;
           }
 
           if (activeSound) {
             osc1.frequency.setValueAtTime(currentFreq, ctx.currentTime);
-            osc2.frequency.setValueAtTime(currentFreq * 1.004, ctx.currentTime);
-            filterNode.frequency.setValueAtTime(Math.max(600, currentFreq * 1.4), ctx.currentTime);
-            masterGain.gain.setTargetAtTime(targetVol * 0.85, ctx.currentTime, 0.025);
+            osc2.frequency.setValueAtTime(currentFreq * 1.006, ctx.currentTime);
+            subOsc.frequency.setValueAtTime(currentFreq * 0.5, ctx.currentTime);
+            filterNode.frequency.setValueAtTime(Math.max(550, currentFreq * 1.6), ctx.currentTime);
+            masterGain.gain.setTargetAtTime(targetVol * 0.9, ctx.currentTime, 0.02);
           } else {
-            masterGain.gain.setTargetAtTime(0, ctx.currentTime, 0.025);
+            masterGain.gain.setTargetAtTime(0, ctx.currentTime, 0.02);
           }
         }
       }
@@ -637,11 +682,11 @@
       const isLive = activeSound || strobeMode > 0 || pttActive;
       led.classList.toggle('live', isLive);
       sysState.textContent = isLive ? 'ACTIVE' : 'OFF';
-      voltMeter.textContent = activeSound ? `${(13.8 - Math.random() * 0.3).toFixed(1)}V` : '14.2V';
+      voltMeter.textContent = activeSound ? `${(13.4 - Math.random() * 0.4).toFixed(1)}V` : '14.2V';
 
-      // Логика стробоскопов и подсветки лобового стекла
+      // Логика стробоскопов
       let rOn = false, wOn = false, bOn = false;
-      if (hornDown && hornFlash) {
+      if ((hornDown || tifonDown) && hornFlash) {
         const pulse = Math.floor(now / 45) % 2 === 0;
         rOn = pulse;
         wOn = true;
@@ -672,7 +717,6 @@
         glow.style.background = 'transparent';
       }
 
-      // Отрисовка осциллографа
       drawScope(activeSound);
       requestAnimationFrame(loop);
     }
